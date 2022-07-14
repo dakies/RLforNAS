@@ -1,0 +1,23 @@
+{
+    "os": "Linux-3.10.0-1160.42.2.el7.x86_64-x86_64-with-glibc2.17",
+    "python": "3.9.12",
+    "heartbeatAt": "2022-07-08T05:50:20.300210",
+    "startedAt": "2022-07-08T05:50:19.884934",
+    "docker": null,
+    "gpu": "NVIDIA GeForce GTX 1080 Ti",
+    "gpu_count": 4,
+    "cpu_count": 40,
+    "cuda": null,
+    "args": null,
+    "state": "running",
+    "program": "taxi.ipynb",
+    "root": "/home/sem22h2/Documents/ExploringRL",
+    "git": {
+        "remote": "https://github.com/daniekie/ExploringRL.git",
+        "commit": "ec00739e4858c971ea9ad75d2b4dbf24ca1ee03d"
+    },
+    "email": null,
+    "host": "sassauna2.ee.ethz.ch",
+    "username": "sem22h2",
+    "executable": "/home/sem22h2/.conda/envs/RL/bin/python"
+}

@@ -1,0 +1,21 @@
+Failure # 1 (occurred at 2022-07-08_07-45-20)
+Traceback (most recent call last):
+  File "/home/sem22h2/.conda/envs/RL/lib/python3.9/site-packages/ray/tune/ray_trial_executor.py", line 934, in get_next_executor_event
+    future_result = ray.get(ready_future)
+  File "/home/sem22h2/.conda/envs/RL/lib/python3.9/site-packages/ray/_private/client_mode_hook.py", line 105, in wrapper
+    return func(*args, **kwargs)
+  File "/home/sem22h2/.conda/envs/RL/lib/python3.9/site-packages/ray/worker.py", line 1833, in get
+    raise value
+ray.exceptions.RayActorError: The actor died because of an error raised in its creation task, [36mray::PPOTrainer.__init__()[39m (pid=36112, ip=129.132.4.155, repr=PPOTrainer)
+  File "/home/sem22h2/.conda/envs/RL/lib/python3.9/site-packages/ray/rllib/agents/trainer.py", line 870, in __init__
+    super().__init__(
+  File "/home/sem22h2/.conda/envs/RL/lib/python3.9/site-packages/ray/tune/trainable.py", line 156, in __init__
+    self.setup(copy.deepcopy(self.config))
+  File "/home/sem22h2/.conda/envs/RL/lib/python3.9/site-packages/ray/rllib/agents/trainer.py", line 883, in setup
+    self.config = self.merge_trainer_configs(
+  File "/home/sem22h2/.conda/envs/RL/lib/python3.9/site-packages/ray/rllib/agents/trainer.py", line 2258, in merge_trainer_configs
+    return deep_update(
+  File "/home/sem22h2/.conda/envs/RL/lib/python3.9/site-packages/ray/util/ml_utils/dict.py", line 52, in deep_update
+    raise Exception("Unknown config parameter `{}` ".format(k))
+Exception: Unknown config parameter `num_cpu`
+
