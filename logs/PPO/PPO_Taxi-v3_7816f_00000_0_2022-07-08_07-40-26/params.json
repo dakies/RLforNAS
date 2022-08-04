@@ -1,9 +1,0 @@
-{
-  "env": "Taxi-v3",
-  "framework": "torch",
-  "num_cpu": 5,
-  "num_cpu_workers": 10,
-  "num_gpus": 2,
-  "num_workers": 1,
-  "record_env": true
-}
