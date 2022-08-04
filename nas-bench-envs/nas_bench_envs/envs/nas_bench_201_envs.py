@@ -1,5 +1,3 @@
-from typing import Optional
-
 import gym
 import numpy as np
 from gym import spaces
@@ -9,11 +7,17 @@ from nats_bench import create
 api = create("/scratch2/sem22hs2/NATS-tss-v1_0-3ffb9-simple", 'tss', fast_mode=True, verbose=False)
 
 
-class NasBench201Env(gym.Env):
+class NasBench201(gym.Env):
     metadata = {"render_modes": [], "render_fps": 1}
 
-    def __init__(self, step_max=1000, render_mode: Optional[str] = None):
-        assert render_mode is None  # or render_mode in self.metadata["render_modes"]
+    def __init__(self, random_init=True, render_mode=None):
+        """
+
+        :param render_mode:
+        """
+        assert render_mode is None or render_mode in self.metadata["render_modes"]
+        # Config
+        self.random_init = random_init
 
         # Environment definition
         self.vertices = 4
@@ -49,7 +53,7 @@ class NasBench201Env(gym.Env):
         obs = []
         for i in range(tensor.shape[2]):
             obs.extend(tensor[self.triu_x, self.triu_y, i])
-        return obs
+        return np.array(obs)
 
     def _get_info(self):
         return {"adjacency_tensor": self.adjacency_tensor}
@@ -110,10 +114,27 @@ class NasBench201Env(gym.Env):
         done = False
         return observation, reward, done, info
 
+    def set_rand_tensor(self):
+        """
+        Initialize a random upper diagonal hot-one tensor.
+        :return: hot one encoded tensor
+        """
+        # Iterate matrix in x-y dimension
+        for x, y in zip(self.triu_x, self.triu_y):
+            # Chance of encoding an element in current row to 1
+            if np.random.random_sample() > 0.5:
+                idx_z = np.random.randint(0, self.adjacency_tensor.shape[0])
+                self.adjacency_tensor[idx_z, y, x] = 1
+
     def reset(self):
         v = self.vertices
         no_ops = len(self.ops)
         self.adjacency_tensor = np.zeros([no_ops, v, v])
-        self.adjacency_tensor[0, 0, 3] = 1
+
+        if self.random_init:
+            self.set_rand_tensor()
+        else:
+            self.adjacency_tensor[0, 0, 3] = 1
+
         observation = self._get_obs()
         return observation
