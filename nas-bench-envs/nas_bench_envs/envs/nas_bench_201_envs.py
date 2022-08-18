@@ -1,6 +1,11 @@
 import gym
+import matplotlib.pyplot as plt
+import networkx as nx
 import numpy as np
 from gym import spaces
+from gym.utils.renderer import Renderer
+from matplotlib.backends.backend_agg import FigureCanvasAgg as FigureCanvas
+from matplotlib.figure import Figure
 from nats_bench import create
 
 # Create the API instance for the topology search space in NATS
@@ -8,7 +13,7 @@ api = create("/scratch2/sem22hs2/NATS-tss-v1_0-3ffb9-simple", 'tss', fast_mode=T
 
 
 class NasBench201(gym.Env):
-    metadata = {"render_modes": [], "render_fps": 1}
+    metadata = {"render_modes": ["human"], "render_fps": 1}
 
     def __init__(self, random_init=True, render_mode=None):
         """
@@ -16,6 +21,8 @@ class NasBench201(gym.Env):
         :param render_mode:
         """
         assert render_mode is None or render_mode in self.metadata["render_modes"]
+        self.render_mode = render_mode  # Define the attribute render_mode in your environment
+
         # Config
         self.random_init = random_init
 
@@ -38,14 +45,14 @@ class NasBench201(gym.Env):
         self.triu_y, self.triu_x = np.triu_indices(v, 1)  # Indices of upper triangular matrix
         self.num_triu = len(self.triu_y)  # Number of upper triangular elements in matrix
         num_triu = self.num_triu
+
         self.observation_space = spaces.MultiBinary(no_ops * num_triu)
         self.action_space = spaces.Discrete(no_ops * num_triu)
 
         # Len intervals
         self.max_episode_steps = 100
 
-        # if self.render_mode == "human":
-        #    pass
+        self.renderer = Renderer(self.render_mode, self._render_frame)
         return
 
     def _get_obs(self):
@@ -114,7 +121,7 @@ class NasBench201(gym.Env):
         done = False
         return observation, reward, done, info
 
-    def set_rand_tensor(self):
+    def _set_rand_tensor(self):
         """
         Initialize a random upper diagonal hot-one tensor.
         :return: hot one encoded tensor
@@ -132,15 +139,74 @@ class NasBench201(gym.Env):
         self.adjacency_tensor = np.zeros([no_ops, v, v])
 
         if self.random_init:
-            self.set_rand_tensor()
+            self._set_rand_tensor()
         else:
             self.adjacency_tensor[0, 0, 3] = 1
 
         observation = self._get_obs()
         return observation
 
+    def render(self, mode="human"):
+        # Just return the list of render frames collected by the Renderer.
+        return self.renderer.get_renders()
+
+    def _render_frame(self, mode: str):
+        G = nx.DiGraph()
+        edge_labels = {}
+        for edge in zip(self.triu_x, self.triu_y):
+            if self.adjacency_tensor[edge, :].any():
+                G.add_edge(edge[0], edge[1])
+                op = self._label_to_op[self.adjacency_tensor[edge, :].nonzero()[0][0]]
+                edge_labels[edge] = op
+
+        # explicitly set positions
+        pos = {0: (0, 0), 1: (10, 15), 2: (10, -15), 3: (40, 0)}
+
+        options = {
+            # "font_size": 15,
+            # "node_size": 350,
+            # "node_color": "white",
+            # "edgecolors": "black",
+            # "linewidths": 2,
+            # "width": 2,
+        }
+        G = G.reverse()
+        nx.draw_networkx(G, pos, **options)
+        nx.draw_networkx_edge_labels(
+            G, pos,
+            edge_labels=edge_labels
+            # font_color='red'
+        )
+
+        if self.render_mode == "human":
+            # Set margins for the axes so that nodes aren't clipped
+            ax = plt.gca()
+            ax.margins(0.20)
+            plt.axis("off")
+            plt.show()
+
+            # assert self.window is not None
+            # The following line copies our drawings from `canvas` to the visible window
+            # self.window.blit(canvas, canvas.get_rect())
+            # pygame.event.pump()
+            # pygame.display.update()
+
+            # We need to ensure that human-rendering occurs at the predefined framerate.
+            # The following line will automatically add a delay to keep the framerate stable.
+        else:  # rgb_array or single_rgb_array
+            fig = Figure()
+            canvas = FigureCanvas(fig)
+            ax = fig.gca()
+
+            ax.margins(0.20)
+            plt.axis("off")
+
+            canvas.draw()  # draw the canvas, cache the renderer
+            return np.frombuffer(canvas.tostring_rgb(), dtype='uint8')
+
 
 class NasBench201Clusters(gym.Env):
+    # Todo: make this into a wrapper of NasBench201 for clusters
     metadata = {"render_modes": [], "render_fps": 1}
 
     def __init__(self, random_init=True, render_mode=None, dataset='cifar_10'):
@@ -238,16 +304,16 @@ class NasBench201Clusters(gym.Env):
     def _get_reward(self):
         arch_str = self._ten2str()
         datatable = self.datatable
-        _, cluster, acc_cifar10, acc_cifar100, acc_imagenet_16 = datatable[np.where(datatable == arch_str)[0]]
-        if cluster == self.cluster:
+        _, cluster, acc_cifar10, acc_cifar100, acc_imagenet_16 = datatable[np.where(datatable == arch_str)[0]][0]
+        if cluster != self.cluster:
             return -1
         else:
             if self.dataset == 'cifar_100':
-                return acc_cifar100 / 100
+                return float(acc_cifar100) / 100
             elif self.dataset == 'imagenet_16':
-                return acc_imagenet_16 / 100
+                return float(acc_imagenet_16) / 100
             elif self.dataset == 'cifar_10':
-                return acc_cifar10 / 100
+                return float(acc_cifar10) / 100
 
     def step(self, action):
         # Determine new adjacency matrix and observation space
@@ -289,3 +355,61 @@ class NasBench201Clusters(gym.Env):
 
         observation = self._get_obs()
         return observation
+
+    def render(self, mode="human"):
+        # Just return the list of render frames collected by the Renderer.
+        return self.renderer.get_renders()
+
+    def _render_frame(self, mode: str):
+        G = nx.DiGraph()
+        edge_labels = {}
+        for edge in zip(self.triu_x, self.triu_y):
+            if self.adjacency_tensor[edge, :].any():
+                G.add_edge(edge[0], edge[1])
+                op = self._label_to_op[self.adjacency_tensor[edge, :].nonzero()[0][0]]
+                edge_labels[edge] = op
+
+        # explicitly set positions
+        pos = {0: (0, 0), 1: (10, 15), 2: (10, -15), 3: (40, 0)}
+
+        options = {
+            # "font_size": 15,
+            # "node_size": 350,
+            # "node_color": "white",
+            # "edgecolors": "black",
+            # "linewidths": 2,
+            # "width": 2,
+        }
+        G = G.reverse()
+        nx.draw_networkx(G, pos, **options)
+        nx.draw_networkx_edge_labels(
+            G, pos,
+            edge_labels=edge_labels
+            # font_color='red'
+        )
+
+        if self.render_mode == "human":
+            # Set margins for the axes so that nodes aren't clipped
+            ax = plt.gca()
+            ax.margins(0.20)
+            plt.axis("off")
+            plt.show()
+
+            # assert self.window is not None
+            # The following line copies our drawings from `canvas` to the visible window
+            # self.window.blit(canvas, canvas.get_rect())
+            # pygame.event.pump()
+            # pygame.display.update()
+
+            # We need to ensure that human-rendering occurs at the predefined framerate.
+            # The following line will automatically add a delay to keep the framerate stable.
+        else:  # rgb_array or single_rgb_array
+            fig = Figure()
+            canvas = FigureCanvas(fig)
+            ax = fig.gca()
+
+            ax.margins(0.20)
+            plt.axis("off")
+
+            canvas.draw()  # draw the canvas, cache the renderer
+            return np.frombuffer(canvas.tostring_rgb(), dtype='uint8')
