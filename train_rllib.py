@@ -16,7 +16,7 @@ import sys
 
 import ray
 from ray import air, tune
-from ray.rllib.algorithms import ppo, PPO, PPOConfig
+from ray.rllib.algorithms import ppo
 from ray.rllib.models import ModelCatalog
 from ray.rllib.models.tf.fcnet import FullyConnectedNetwork
 from ray.rllib.models.tf.tf_modelv2 import TFModelV2
@@ -143,9 +143,11 @@ if __name__ == "__main__":
 
     config = {
         "env": NasBench201,  # or "corridor" if registered above
-        # "env_config": {
-        #    "corridor_length": 5,
-        # },
+        "env_config": {
+            "network_init": "cluster",
+            "render_mode": "rgb",
+            "dataset": "cifar_10",
+        },
         # Use GPUs iff `RLLIB_NUM_GPUS` env var set to > 0.
         "num_gpus": int(os.environ.get("RLLIB_NUM_GPUS", "0")),  # Todo: Change to arg with default 1
         "model": {
@@ -169,20 +171,18 @@ if __name__ == "__main__":
         print("Running manual train loop without Ray Tune.")
         ppo_config = ppo.DEFAULT_CONFIG.copy()
         ppo_config.update(config)
-        # use fixed learning rate instead of grid search (needs tune)
-        ppo_config["lr"] = 1e-3
 
         config = (
-            PPOConfig()
-                .framework("torch")
-                .resources(num_gpus=1, num_cpus_per_worker=1)
-                .environment(env=NasBench201, render_env=False)
-                .rollouts(horizon=1000)
+            ppo_config()
+            .framework("torch")
+            .resources(num_gpus=1, num_cpus_per_worker=1)
+            .environment(env=NasBench201, render_env=False)
+            .rollouts(horizon=1000)
 
         )
         ray.init(ignore_reinit_error=True)
         tune.run(
-            PPO,
+            ppo.PPO,
             config=config.to_dict(),
             stop={"training_iteration": 100},
             callbacks=[
