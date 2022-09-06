@@ -83,7 +83,7 @@ class NASNetworkDARTS(nn.Module):
 
     def genotype2cmd(self, genotype):
         cmd = "Genotype(normal=%s, normal_concat=[2, 3, 4, 5], reduce=%s, reduce_concat=[2, 3, 4, 5])" % (
-        genotype['normal'], genotype['reduce'])
+            genotype['normal'], genotype['reduce'])
         return cmd
 
     def genotype(self) -> Dict[Text, List]:

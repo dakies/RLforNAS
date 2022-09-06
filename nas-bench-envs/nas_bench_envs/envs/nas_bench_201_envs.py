@@ -17,16 +17,13 @@ api = create("/scratch2/sem22hs2/NATS-tss-v1_0-3ffb9-simple", 'tss', fast_mode=T
 class NasBench201(gym.Env):
     metadata = {"render_modes": ["human"], "render_fps": 1}
 
-    def __init__(self, random_init=True, render_mode=None):
-        """
-
-        :param render_mode:
-        """
-        assert render_mode is None or render_mode in self.metadata["render_modes"]
-        self.render_mode = render_mode  # Define the attribute render_mode in your environment
-
+    def __init__(self, config=None):
         # Config
-        self.random_init = random_init
+        if config is None:
+            config = {}
+        self.network_init = config.get("network_init", "cluster")
+        self.render_mode = config.get("render_mode", "rgb")
+        self.dataset = config.get("dataset", "cifar10")
 
         # Environment definition
         self.vertices = 4
@@ -47,14 +44,19 @@ class NasBench201(gym.Env):
         self.triu_y, self.triu_x = np.triu_indices(v, 1)  # Indices of upper triangular matrix
         self.num_triu = len(self.triu_y)  # Number of upper triangular elements in matrix
         num_triu = self.num_triu
-        self.reward = np.nan
 
+        # Environment
         self.observation_space = spaces.MultiBinary(no_ops * num_triu)
         self.action_space = spaces.Discrete(no_ops * num_triu)
+        self.reward = np.nan
 
         # Len intervals
         self.max_episode_steps = 100
 
+        # Load clustering labels and accuracies from C-Bred
+        self.datatable = np.load('rl_dat.npy')
+
+        # Rendering
         self.renderer = Renderer(self.render_mode, self._render_frame)
         return
 
@@ -66,7 +68,12 @@ class NasBench201(gym.Env):
         return np.array(obs)
 
     def _get_info(self):
-        return {"adjacency_tensor": self.adjacency_tensor, "step_reward": self.reward}
+        return {"adjacency_tensor": self.adjacency_tensor,
+                "step_reward": self.reward,
+                "train_time": int(self._nb201_lookup()['train-all-time']),
+                # "NATS_info": self._nb201_lookup(),
+                # "cost_info": api.get_cost_info(self._ten2str(), self.dataset),
+                }
 
     def _action2tensor(self, action):
         no_triu = self.num_triu
@@ -104,8 +111,23 @@ class NasBench201(gym.Env):
     def _nb201_lookup(self):
         arch_str = self._ten2str()
         # print(arch_str)
-        info = api.get_more_info(arch_str, 'cifar10')
+        info = api.get_more_info(arch_str, self.dataset)
         return info
+
+    def _get_reward(self):
+        arch_str = self._ten2str()
+        datatable = self.datatable
+        _, cluster, acc_cifar10, acc_cifar100, acc_imagenet_16 = datatable[np.where(datatable == arch_str)[0]][0]
+        cluster = int(cluster)
+        # print("Cluster comparison. Current:{} Goal:{} Comparison{}".format(cluster, self.cluster,
+        #                                                                    cluster != self.cluster))
+        if self.dataset == 'cifar100':
+            reward = float(acc_cifar100) / 100
+        elif self.dataset == 'imagenet_16':
+            reward = float(acc_imagenet_16) / 100
+        elif self.dataset == 'cifar10':
+            reward = float(acc_cifar10) / 100
+        return reward, cluster
 
     def step(self, action):
         # Determine new adjacency matrix and observation space
@@ -116,17 +138,15 @@ class NasBench201(gym.Env):
             # breakpoint()
             assert (np.allclose(matrix, np.triu(matrix)))
         # Calculate reward
-        info = self._nb201_lookup()
-        reward = info["test-accuracy"] / 100
+        reward, _ = self._get_reward()
         self.reward = reward
         # breakpoint()
         observation = self._get_obs()
         info = self._get_info()
         done = False
-        # Todo: remove log again
-        return observation, np.log(reward), done, info
+        return observation, reward, done, info
 
-    def _set_rand_tensor(self):
+    def set_rand_tensor(self):
         """
         Initialize a random upper diagonal hot-one tensor.
         :return: hot one encoded tensor
@@ -138,15 +158,32 @@ class NasBench201(gym.Env):
                 idx_z = np.random.randint(0, self.adjacency_tensor.shape[0])
                 self.adjacency_tensor[idx_z, y, x] = 1
 
-    def reset(self):
+    def get_adjacency_tensor(self, genotype_list):
+        """
+        Calculates the Adjacency Tensor of the given genotype, focusing both on connectivity and operations contained.
+        :return: adjacency_tensor: (np.ndarray) Adjacency Tensor.
+        """
+        adjacency_tensor = np.zeros(
+            (len(self.ops), len(genotype_list) + 1, len(genotype_list) + 1))
+        for i, state in enumerate(genotype_list):
+            for j, op in enumerate(state):
+                source = op[1]
+                if op[0] != 'none':
+                    idx = np.argwhere(np.array(self.ops) == op[0])
+                    adjacency_tensor[idx, source, i + 1] = 1
+        return adjacency_tensor
+
+    def reset(self, **kwargs):
         v = self.vertices
         no_ops = len(self.ops)
         self.adjacency_tensor = np.zeros([no_ops, v, v])
 
-        if self.random_init:
-            self._set_rand_tensor()
-        else:
+        if self.network_init == "random":
+            self.set_rand_tensor()
+        elif self.network_init == "fixed":
             self.adjacency_tensor[0, 0, 3] = 1
+        else:
+            raise "Error: not defined initialization method."
 
         observation = self._get_obs()
         return observation
@@ -224,7 +261,7 @@ class NasBench201Clusters(gym.Env):
             config = {}
         self.network_init = config.get("network_init", "cluster")
         self.render_mode = config.get("render_mode", "rgb")
-        self.dataset = config.get("dataset", "cifar_10")
+        self.dataset = config.get("dataset", "cifar10")
         self.cluster = config.get("cluster", 11)
 
         # Environment definition
@@ -246,6 +283,8 @@ class NasBench201Clusters(gym.Env):
         self.triu_y, self.triu_x = np.triu_indices(v, 1)  # Indices of upper triangular matrix
         self.num_triu = len(self.triu_y)  # Number of upper triangular elements in matrix
         num_triu = self.num_triu
+
+        # Environment
         self.observation_space = spaces.MultiBinary(no_ops * num_triu)
         self.action_space = spaces.Discrete(no_ops * num_triu)
         self.reward = np.nan
@@ -253,7 +292,7 @@ class NasBench201Clusters(gym.Env):
         # Len intervals
         self.max_episode_steps = 100
 
-        # Load clustering labels and accuracies
+        # Load clustering labels and accuracies from C-Bred
         self.datatable = np.load('rl_dat.npy')
 
         # Rendering
@@ -277,8 +316,9 @@ class NasBench201Clusters(gym.Env):
     def _get_info(self):
         return {"adjacency_tensor": self.adjacency_tensor,
                 "step_reward": self.reward,
-                "cluster": self.current_cluster,
-                "step_out_cluster": self.in_cluster == 0 and self.in_cluster_prev == 1
+                "train_time": int(self._nb201_lookup()['train-all-time']),
+                # "NATS_info": self._nb201_lookup(),
+                # "cost_info": api.get_cost_info(self._ten2str(), self.dataset),
                 }
 
     def _action2tensor(self, action):
@@ -317,7 +357,7 @@ class NasBench201Clusters(gym.Env):
     def _nb201_lookup(self):
         arch_str = self._ten2str()
         # print(arch_str)
-        info = api.get_more_info(arch_str, 'cifar10')
+        info = api.get_more_info(arch_str, self.dataset)
         return info
 
     def _get_reward(self):
@@ -331,19 +371,19 @@ class NasBench201Clusters(gym.Env):
         self.in_cluster_prev = self.in_cluster
         if cluster != self.cluster:
             self.in_cluster = 1
-            if self.dataset == 'cifar_100':
+            if self.dataset == 'cifar100':
                 return float(acc_cifar100) / 100 / 2
             elif self.dataset == 'imagenet_16':
                 return float(acc_imagenet_16) / 100 / 2
-            elif self.dataset == 'cifar_10':
+            elif self.dataset == 'cifar10':
                 return float(acc_cifar10) / 100 / 2
         else:
             self.in_cluster = 0
-            if self.dataset == 'cifar_100':
+            if self.dataset == 'cifar100':
                 return float(acc_cifar100) / 100
             elif self.dataset == 'imagenet_16':
                 return float(acc_imagenet_16) / 100
-            elif self.dataset == 'cifar_10':
+            elif self.dataset == 'cifar10':
                 return float(acc_cifar10) / 100
 
     def step(self, action):
@@ -390,7 +430,7 @@ class NasBench201Clusters(gym.Env):
                     adjacency_tensor[idx, source, i + 1] = 1
         return adjacency_tensor
 
-    def reset(self):
+    def reset(self, **kwargs):
         v = self.vertices
         no_ops = len(self.ops)
         self.adjacency_tensor = np.zeros([no_ops, v, v])
@@ -470,3 +510,55 @@ class NasBench201Clusters(gym.Env):
 
             canvas.draw()  # draw the canvas, cache the renderer
             return np.frombuffer(canvas.tostring_rgb(), dtype='uint8')
+
+
+class CbredWrapper(gym.Wrapper):
+    def __init__(self, config=None):
+        super().__init__(config)
+        self.cluster = config.get("cluster", 11)
+        # For logging
+        self.in_cluster = 0
+        self.in_cluster_prev = 0
+        self.current_cluster = 0
+
+    def _get_info(self):
+        info = super()._get_info()
+        info.update({
+            "cluster": self.current_cluster,
+            "step_out_cluster": self.in_cluster == 0 and self.in_cluster_prev == 1,
+            "step_in_cluster": self.in_cluster == 1 and self.in_cluster_prev == 0})
+        return info
+
+    def reset(self, **kwargs):
+        v = self.vertices
+        no_ops = len(self.ops)
+        self.adjacency_tensor = np.zeros([no_ops, v, v])
+
+        if self.network_init == "random":
+            self.set_rand_tensor()
+        elif self.network_init == "fixed":
+            self.adjacency_tensor[0, 0, 3] = 1
+        elif self.network_init == "cluster":
+            datatable = self.datatable
+            cluster = self.cluster
+            cluster_idx = np.where(datatable[:, 1] == str(cluster))[0]
+            arch_string = np.random.choice(datatable[cluster_idx, 0])
+            genotype = arch_string
+            genotype_list = CellStructure.str2fullstructure(genotype).tolist()[0]
+            self.adjacency_tensor = self.get_adjacency_tensor(genotype_list)
+        else:
+            raise "Error: not defined initialization method."
+
+        observation = self._get_obs()
+        return observation
+
+    def _get_reward(self):
+        reward, cluster = super()._get_reward()
+        self.current_cluster = cluster
+        self.in_cluster_prev = self.in_cluster
+        if cluster != self.cluster:
+            self.in_cluster = 0
+            reward = reward / 2
+        else:
+            self.in_cluster = 1
+        return reward

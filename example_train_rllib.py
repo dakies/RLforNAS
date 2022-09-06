@@ -1,48 +1,36 @@
 """
 Example of a custom gym environment and model. Run this for a demo.
-Includes method for:
+This example shows:
   - using a custom environment
   - using a custom model
   - using Tune for grid search to try different learning rates
 You can visualize experiment results in ~/ray_results using TensorBoard.
 Run example with defaults:
-$ python train_rllib.py
+$ python custom_env.py
 For CLI options:
-$ python train_rllib.py --help
+$ python custom_env.py --help
 """
 import argparse
 import os
-import sys
+import random
 
+import gym
+import numpy as np
 import ray
+from gym.spaces import Discrete, Box
 from ray import air, tune
 from ray.rllib.algorithms import ppo
+from ray.rllib.env.env_context import EnvContext
 from ray.rllib.models import ModelCatalog
 from ray.rllib.models.tf.fcnet import FullyConnectedNetwork
 from ray.rllib.models.tf.tf_modelv2 import TFModelV2
 from ray.rllib.models.torch.fcnet import FullyConnectedNetwork as TorchFC
 from ray.rllib.models.torch.torch_modelv2 import TorchModelV2
-from ray.rllib.utils.framework import try_import_torch
+from ray.rllib.utils.framework import try_import_tf, try_import_torch
 from ray.rllib.utils.test_utils import check_learning_achieved
-from ray.tune.integration.wandb import WandbLoggerCallback
 from ray.tune.logger import pretty_print
 
-module_path = os.path.abspath(os.path.join('nas-bench-envs'))
-if module_path not in sys.path:
-    sys.path.append(module_path)
-    os.environ['PYTHONPATH'] = module_path
-from nas_bench_envs.envs.nas_bench_201_envs import NasBench201
-from ray.tune.registry import register_env
-
-
-def env_creator(env_config):
-    return NasBench201(env_config)
-
-
-select_env = "NasBench201"
-register_env(select_env, env_creator)
-
-# tf1, tf, tfv = try_import_tf()
+tf1, tf, tfv = try_import_tf()
 torch, nn = try_import_torch()
 
 parser = argparse.ArgumentParser()
@@ -52,7 +40,7 @@ parser.add_argument(
 parser.add_argument(
     "--framework",
     choices=["tf", "tf2", "tfe", "torch"],
-    default="torch",
+    default="tf",
     help="The DL framework specifier.",
 )
 parser.add_argument(
@@ -68,7 +56,7 @@ parser.add_argument(
     "--stop-timesteps", type=int, default=100000, help="Number of timesteps to train."
 )
 parser.add_argument(
-    "--stop-reward", type=float, default=0.95, help="Reward at which we stop training."
+    "--stop-reward", type=float, default=0.1, help="Reward at which we stop training."
 )
 parser.add_argument(
     "--no-tune",
@@ -81,12 +69,36 @@ parser.add_argument(
     action="store_true",
     help="Init Ray in local mode for easier debugging.",
 )
-parser.add_argument(
-    "--model",
-    choices=["default", "custom"],
-    default="default",
-    help="Choose between default NN model and custom ones for policy.",
-)
+
+
+class SimpleCorridor(gym.Env):
+    """Example of a custom env in which you have to walk down a corridor.
+    You can configure the length of the corridor via the env config."""
+
+    def __init__(self, config: EnvContext):
+        self.end_pos = config["corridor_length"]
+        self.cur_pos = 0
+        self.action_space = Discrete(2)
+        self.observation_space = Box(0.0, self.end_pos, shape=(1,), dtype=np.float32)
+        # Set the seed. This is only used for the final (reach goal) reward.
+        self.seed(config.worker_index * config.num_workers)
+
+    def reset(self):
+        self.cur_pos = 0
+        return [self.cur_pos]
+
+    def step(self, action):
+        assert action in [0, 1], action
+        if action == 0 and self.cur_pos > 0:
+            self.cur_pos -= 1
+        elif action == 1:
+            self.cur_pos += 1
+        done = self.cur_pos >= self.end_pos
+        # Produce a random reward when we reach the goal.
+        return [self.cur_pos], random.random() * 2 if done else -0.1, done, {}
+
+    def seed(self, seed=None):
+        random.seed(seed)
 
 
 class CustomModel(TFModelV2):
@@ -136,20 +148,18 @@ if __name__ == "__main__":
     ray.init(local_mode=args.local_mode)
 
     # Can also register the env creator function explicitly with:
-    # register_env("corridor", lambda config: NasBench201(config))
+    # register_env("corridor", lambda config: SimpleCorridor(config))
     ModelCatalog.register_custom_model(
         "my_model", TorchCustomModel if args.framework == "torch" else CustomModel
     )
 
     config = {
-        "env": NasBench201,  # or "corridor" if registered above
+        "env": SimpleCorridor,  # or "corridor" if registered above
         "env_config": {
-            "network_init": "cluster",
-            "render_mode": "rgb",
-            "dataset": "cifar_10",
+            "corridor_length": 5,
         },
         # Use GPUs iff `RLLIB_NUM_GPUS` env var set to > 0.
-        "num_gpus": int(os.environ.get("RLLIB_NUM_GPUS", "0")),  # Todo: Change to arg with default 1
+        "num_gpus": int(os.environ.get("RLLIB_NUM_GPUS", "0")),
         "model": {
             "custom_model": "my_model",
             "vf_share_layers": True,
@@ -171,24 +181,9 @@ if __name__ == "__main__":
         print("Running manual train loop without Ray Tune.")
         ppo_config = ppo.DEFAULT_CONFIG.copy()
         ppo_config.update(config)
-
-        config = (
-            ppo_config()
-            .framework("torch")
-            .resources(num_gpus=1, num_cpus_per_worker=1)
-            .environment(env=NasBench201, render_env=False)
-            .rollouts(horizon=1000)
-
-        )
-        ray.init(ignore_reinit_error=True)
-        tune.run(
-            ppo.PPO,
-            config=config.to_dict(),
-            stop={"training_iteration": 100},
-            callbacks=[
-                WandbLoggerCallback(api_key="c36c598399c6c7f2f0b446aac164da6c7956a263", project="RayNasBenchV0")])
-
-        trainer = ppo.PPO(config=ppo_config, env=NasBench201)
+        # use fixed learning rate instead of grid search (needs tune)
+        ppo_config["lr"] = 1e-3
+        trainer = ppo.PPO(config=ppo_config, env=SimpleCorridor)
         # run manual training loop and print results after each iteration
         for _ in range(args.stop_iters):
             result = trainer.train()
