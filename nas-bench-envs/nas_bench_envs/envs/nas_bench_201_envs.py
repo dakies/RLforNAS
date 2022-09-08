@@ -54,7 +54,7 @@ class NasBench201(gym.Env):
         self.max_episode_steps = 100
 
         # Load clustering labels and accuracies from C-Bred
-        self.datatable = np.load('rl_dat.npy')
+        self.datatable = np.load('/home/sem22h2/Documents/ExploringRL/rl_dat.npy')
 
         # Rendering
         self.renderer = Renderer(self.render_mode, self._render_frame)
@@ -248,7 +248,6 @@ class NasBench201(gym.Env):
 
 
 class NasBench201Clusters(gym.Env):
-    # Todo: make this into a wrapper of NasBench201 for clusters
     metadata = {"render_modes": [], "render_fps": 1}
 
     def __init__(self, config=None):
@@ -293,7 +292,8 @@ class NasBench201Clusters(gym.Env):
         self.max_episode_steps = 100
 
         # Load clustering labels and accuracies from C-Bred
-        self.datatable = np.load('rl_dat.npy')
+
+        self.datatable = np.load('/home/sem22h2/Documents/ExploringRL/rl_dat.npy')
 
         # Rendering
         self.renderer = Renderer(self.render_mode, self._render_frame)
@@ -317,6 +317,7 @@ class NasBench201Clusters(gym.Env):
         return {"adjacency_tensor": self.adjacency_tensor,
                 "step_reward": self.reward,
                 "train_time": int(self._nb201_lookup()['train-all-time']),
+                "in_cluster": bool(self.in_cluster),
                 # "NATS_info": self._nb201_lookup(),
                 # "cost_info": api.get_cost_info(self._ten2str(), self.dataset),
                 }
@@ -370,7 +371,7 @@ class NasBench201Clusters(gym.Env):
         self.current_cluster = cluster
         self.in_cluster_prev = self.in_cluster
         if cluster != self.cluster:
-            self.in_cluster = 1
+            self.in_cluster = 0
             if self.dataset == 'cifar100':
                 return float(acc_cifar100) / 100 / 2
             elif self.dataset == 'imagenet_16':
@@ -378,7 +379,7 @@ class NasBench201Clusters(gym.Env):
             elif self.dataset == 'cifar10':
                 return float(acc_cifar10) / 100 / 2
         else:
-            self.in_cluster = 0
+            self.in_cluster = 1
             if self.dataset == 'cifar100':
                 return float(acc_cifar100) / 100
             elif self.dataset == 'imagenet_16':
@@ -510,55 +511,3 @@ class NasBench201Clusters(gym.Env):
 
             canvas.draw()  # draw the canvas, cache the renderer
             return np.frombuffer(canvas.tostring_rgb(), dtype='uint8')
-
-
-class CbredWrapper(gym.Wrapper):
-    def __init__(self, config=None):
-        super().__init__(config)
-        self.cluster = config.get("cluster", 11)
-        # For logging
-        self.in_cluster = 0
-        self.in_cluster_prev = 0
-        self.current_cluster = 0
-
-    def _get_info(self):
-        info = super()._get_info()
-        info.update({
-            "cluster": self.current_cluster,
-            "step_out_cluster": self.in_cluster == 0 and self.in_cluster_prev == 1,
-            "step_in_cluster": self.in_cluster == 1 and self.in_cluster_prev == 0})
-        return info
-
-    def reset(self, **kwargs):
-        v = self.vertices
-        no_ops = len(self.ops)
-        self.adjacency_tensor = np.zeros([no_ops, v, v])
-
-        if self.network_init == "random":
-            self.set_rand_tensor()
-        elif self.network_init == "fixed":
-            self.adjacency_tensor[0, 0, 3] = 1
-        elif self.network_init == "cluster":
-            datatable = self.datatable
-            cluster = self.cluster
-            cluster_idx = np.where(datatable[:, 1] == str(cluster))[0]
-            arch_string = np.random.choice(datatable[cluster_idx, 0])
-            genotype = arch_string
-            genotype_list = CellStructure.str2fullstructure(genotype).tolist()[0]
-            self.adjacency_tensor = self.get_adjacency_tensor(genotype_list)
-        else:
-            raise "Error: not defined initialization method."
-
-        observation = self._get_obs()
-        return observation
-
-    def _get_reward(self):
-        reward, cluster = super()._get_reward()
-        self.current_cluster = cluster
-        self.in_cluster_prev = self.in_cluster
-        if cluster != self.cluster:
-            self.in_cluster = 0
-            reward = reward / 2
-        else:
-            self.in_cluster = 1
-        return reward

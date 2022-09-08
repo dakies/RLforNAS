@@ -25,9 +25,9 @@ class MetricsCallbacks(DefaultCallbacks):
             "after env reset!"
         )
         episode.user_data["step_reward"] = []
-        # episode.user_data["in_cluster"] = []
-        # episode.user_data["train_time"] = []
-        episode.user_data["step_out_cluster"] = []
+        episode.user_data["in_cluster"] = []
+        episode.user_data["train_time"] = []
+        # episode.user_data["step_out_cluster"] = []
 
     def on_episode_step(
             self,
@@ -47,9 +47,9 @@ class MetricsCallbacks(DefaultCallbacks):
         info = episode.last_info_for()
         if info is not None:
             episode.user_data["step_reward"].append(info["step_reward"])
-            # episode.user_data["in_cluster"].append(info["in_cluster"])
-            # episode.user_data["train_time"].append(info["train_time"])
-            episode.user_data["step_out_cluster"].append(info["step_out_cluster"])
+            episode.user_data["in_cluster"].append(info["in_cluster"])
+            episode.user_data["train_time"].append(info["train_time"])
+            # episode.user_data["step_out_cluster"].append(info["step_out_cluster"])
 
     def on_episode_end(
             self,
@@ -74,10 +74,10 @@ class MetricsCallbacks(DefaultCallbacks):
         episode.custom_metrics["step_reward_max"] = float(np.max(episode.user_data["step_reward"]))
         episode.custom_metrics["step_reward_mean"] = float(np.mean(episode.user_data["step_reward"]))
         episode.custom_metrics["step_reward_min"] = float(np.min(episode.user_data["step_reward"]))
-        # episode.custom_metrics["ratio_in_cluster"] = float(
-        #     episode.user_data["in_cluster"].count(1) / len(episode.user_data["in_cluster"]))
-        # shift_right = np.pad(episode.user_data["in_cluster"], (1, 0), 'edge')
-        # step_out_cluster = np.logical_and(np.logical_not(episode.user_data["in_cluster"]), shift_right[:-1])
-        # episode.custom_metrics["no_step_out_cluster"] = int(np.count_nonzero(step_out_cluster == 1))
-        # episode.custom_metrics["train_time"] = int(np.sum(episode.user_data["train_time"]))
-        episode.custom_metrics["no_step_out_cluster"] = int(episode.user_data["step_out_cluster"].count(1))
+        episode.custom_metrics["ratio_in_cluster"] = float(
+            episode.user_data["in_cluster"].count(1) / len(episode.user_data["in_cluster"]))
+        shift_right = np.pad(episode.user_data["in_cluster"], (1, 0), 'edge')
+        step_out_cluster = np.logical_and(np.logical_not(episode.user_data["in_cluster"]), shift_right[:-1])
+        episode.custom_metrics["no_step_out_cluster"] = int(np.count_nonzero(step_out_cluster == 1))
+        episode.custom_metrics["train_time"] = int(np.sum(episode.user_data["train_time"]))
+        # episode.custom_metrics["no_step_out_cluster"] = int(episode.user_data["step_out_cluster"].count(1))
