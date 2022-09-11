@@ -27,7 +27,7 @@ class MetricsCallbacks(DefaultCallbacks):
         episode.user_data["step_reward"] = []
         episode.user_data["in_cluster"] = []
         episode.user_data["train_time"] = []
-        # episode.user_data["step_out_cluster"] = []
+        # episode.user_data["action_to_cluster_counter"] = []
 
     def on_episode_step(
             self,
@@ -49,7 +49,7 @@ class MetricsCallbacks(DefaultCallbacks):
             episode.user_data["step_reward"].append(info["step_reward"])
             episode.user_data["in_cluster"].append(info["in_cluster"])
             episode.user_data["train_time"].append(info["train_time"])
-            # episode.user_data["step_out_cluster"].append(info["step_out_cluster"])
+            # episode.user_data["action_to_cluster_counter"].append(info["action_to_cluster_counter"])
 
     def on_episode_end(
             self,
@@ -80,4 +80,5 @@ class MetricsCallbacks(DefaultCallbacks):
         step_out_cluster = np.logical_and(np.logical_not(episode.user_data["in_cluster"]), shift_right[:-1])
         episode.custom_metrics["no_step_out_cluster"] = int(np.count_nonzero(step_out_cluster == 1))
         episode.custom_metrics["train_time"] = int(np.sum(episode.user_data["train_time"]))
-        # episode.custom_metrics["no_step_out_cluster"] = int(episode.user_data["step_out_cluster"].count(1))
+        # episode.custom_metrics["action_to_cluster_counter_mean"] = float(np.mean(
+        #     episode.user_data["action_to_cluster_counter"].count(1)))
