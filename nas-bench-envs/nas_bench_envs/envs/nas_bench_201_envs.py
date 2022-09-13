@@ -3,6 +3,7 @@ import matplotlib.pyplot as plt
 import networkx as nx
 import numpy as np
 from gym import spaces
+from gym.spaces import Box, Dict, Discrete
 from gym.utils.renderer import Renderer
 from matplotlib.backends.backend_agg import FigureCanvasAgg as FigureCanvas
 from matplotlib.figure import Figure
@@ -76,21 +77,29 @@ class NasBench201(gym.Env):
                 }
 
     def _action2tensor(self, action):
+        """
+        Returns the new adjacency tensor after action has been applied.
+        :param action:
+        :return:
+        """
         no_triu = self.num_triu
         tensor_z = int(action / no_triu)
         triu_idx = action % no_triu
         tensor_x = self.triu_x[triu_idx]
         tensor_y = self.triu_y[triu_idx]
-
+        new_adjacency_tensor = self.adjacency_tensor.copy()
         element = self.adjacency_tensor[tensor_z, tensor_y, tensor_x]
         new_element = not element
         if new_element is True:
             # Enforce whole row to be zero
-            self.adjacency_tensor[:, tensor_y, tensor_x] = np.zeros(len(self.ops), dtype=int)
-        self.adjacency_tensor[tensor_z, tensor_y, tensor_x] = new_element
-        return
+            new_adjacency_tensor[:, tensor_y, tensor_x] = np.zeros(len(self.ops), dtype=int)
+        new_adjacency_tensor[tensor_z, tensor_y, tensor_x] = new_element
+        return new_adjacency_tensor
 
     def _ten2str(self):
+        """
+         Convert adjacency tensor to string representation. This function might actually exist in the NATSbench utils
+        """
         tensor = self.adjacency_tensor
         arch_str = "|"
         for x in range(tensor.shape[2]):  # x-axis = to
@@ -109,6 +118,7 @@ class NasBench201(gym.Env):
         return arch_str
 
     def _nb201_lookup(self):
+        """ Get the information (accuracy, training time, etc.) from NATSBench API"""
         arch_str = self._ten2str()
         # print(arch_str)
         info = api.get_more_info(arch_str, self.dataset)
@@ -131,7 +141,7 @@ class NasBench201(gym.Env):
 
     def step(self, action):
         # Determine new adjacency matrix and observation space
-        self._action2tensor(action)
+        self.adjacency_tensor = self._action2tensor(action)
         # Check matrix is upper diagonal
         for i in range(self.adjacency_tensor.shape[0]):
             matrix = self.adjacency_tensor[i, :, :]
@@ -248,7 +258,7 @@ class NasBench201(gym.Env):
 
 
 class NasBench201Clusters(gym.Env):
-    metadata = {"render_modes": [], "render_fps": 1}
+    metadata = {"render_modes": ["human", "rgb_array"], "render_fps": 4}
 
     def __init__(self, config=None):
         """
@@ -302,8 +312,6 @@ class NasBench201Clusters(gym.Env):
         self.in_cluster_prev = 0
         self.current_cluster = 0
 
-        # if self.render_mode == "human":
-        #    pass
         return
 
     def _get_obs(self):
@@ -323,22 +331,27 @@ class NasBench201Clusters(gym.Env):
                 }
 
     def _action2tensor(self, action):
+        """
+        Returns the new adjacency tensor after action has been applied.
+        :param action:
+        :return:
+        """
         no_triu = self.num_triu
         tensor_z = int(action / no_triu)
         triu_idx = action % no_triu
         tensor_x = self.triu_x[triu_idx]
         tensor_y = self.triu_y[triu_idx]
-
+        new_adjacency_tensor = self.adjacency_tensor.copy()
         element = self.adjacency_tensor[tensor_z, tensor_y, tensor_x]
         new_element = not element
         if new_element is True:
             # Enforce whole row to be zero
-            self.adjacency_tensor[:, tensor_y, tensor_x] = np.zeros(len(self.ops), dtype=int)
-        self.adjacency_tensor[tensor_z, tensor_y, tensor_x] = new_element
-        return
+            new_adjacency_tensor[:, tensor_y, tensor_x] = np.zeros(len(self.ops), dtype=int)
+        new_adjacency_tensor[tensor_z, tensor_y, tensor_x] = new_element
+        return new_adjacency_tensor
 
-    def _ten2str(self):
-        tensor = self.adjacency_tensor
+    def _ten2str(self, adjacency_tensor):
+        tensor = adjacency_tensor
         arch_str = "|"
         for x in range(tensor.shape[2]):  # x-axis = to
             for y in range(tensor.shape[1]):  # y-axis = from
@@ -356,51 +369,62 @@ class NasBench201Clusters(gym.Env):
         return arch_str
 
     def _nb201_lookup(self):
-        arch_str = self._ten2str()
+        arch_str = self._ten2str(self.adjacency_tensor)
         # print(arch_str)
         info = api.get_more_info(arch_str, self.dataset)
         return info
 
-    def _get_reward(self):
-        arch_str = self._ten2str()
+    def _get_reward(self, adjacency_tensor):
+        arch_str = self._ten2str(adjacency_tensor)
         datatable = self.datatable
         _, cluster, acc_cifar10, acc_cifar100, acc_imagenet_16 = datatable[np.where(datatable == arch_str)[0]][0]
         cluster = int(cluster)
         # print("Cluster comparison. Current:{} Goal:{} Comparison{}".format(cluster, self.cluster,
         #                                                                    cluster != self.cluster))
+        if self.dataset == 'cifar100':
+            reward = float(acc_cifar100) / 100
+        elif self.dataset == 'imagenet_16':
+            reward = float(acc_imagenet_16) / 100
+        elif self.dataset == 'cifar10':
+            reward = float(acc_cifar10) / 100
         self.current_cluster = cluster
         self.in_cluster_prev = self.in_cluster
         if cluster != self.cluster:
             self.in_cluster = 0
-            if self.dataset == 'cifar100':
-                return float(acc_cifar100) / 100 / 2
-            elif self.dataset == 'imagenet_16':
-                return float(acc_imagenet_16) / 100 / 2
-            elif self.dataset == 'cifar10':
-                return float(acc_cifar10) / 100 / 2
+            # reward = -1
         else:
             self.in_cluster = 1
-            if self.dataset == 'cifar100':
-                return float(acc_cifar100) / 100
-            elif self.dataset == 'imagenet_16':
-                return float(acc_imagenet_16) / 100
-            elif self.dataset == 'cifar10':
-                return float(acc_cifar10) / 100
+        return reward, cluster
 
     def step(self, action):
+        # For logging interconnectivity check where all actions lead
+        # action_to_cluster_counter = 0
+        # for a in range(self.no_actions):
+        #     adjacency_tensor = self._action2tensor(a)
+        #     reward, cluster = self._get_reward(adjacency_tensor)
+        #     if cluster == self.cluster:
+        #         action_to_cluster_counter += 1
+
         # Determine new adjacency matrix and observation space
-        self._action2tensor(action)
+        new_adjacency_tensor = self._action2tensor(action)
         # Check matrix is upper diagonal
-        for i in range(self.adjacency_tensor.shape[0]):
-            matrix = self.adjacency_tensor[i, :, :]
-            # breakpoint()
-            assert (np.allclose(matrix, np.triu(matrix)))
+        # for i in range(self.adjacency_tensor.shape[0]):
+        #     matrix = self.adjacency_tensor[i, :, :]
+        #     # breakpoint()
+        #     assert (np.allclose(matrix, np.triu(matrix)))
+
         # Calculate reward
-        reward = self._get_reward()
+        reward, cluster = self._get_reward(new_adjacency_tensor)
         self.reward = reward
-        # breakpoint()
+
+        # Only take step if it leads to a valid cluster. Disadvantage: Agent needs to learn that there are steps it
+        # cannot take
+        if cluster == self.cluster:
+            self.adjacency_tensor = new_adjacency_tensor
+
         observation = self._get_obs()
         info = self._get_info()
+        # info["action_to_cluster_counter"] = action_to_cluster_counter
         done = False
         return observation, reward, done, info
 
@@ -452,13 +476,16 @@ class NasBench201Clusters(gym.Env):
             raise "Error: not defined initialization method."
 
         observation = self._get_obs()
+        if self.render_mode == "human":
+            self._render_frame()
         return observation
 
-    def render(self, mode="human"):
+    def render(self, mode="rgb_array"):
         # Just return the list of render frames collected by the Renderer.
-        return self.renderer.get_renders()
+        if self.render_mode == "rgb_array":
+            return self._render_frame()
 
-    def _render_frame(self, mode: str):
+    def _render_frame(self):
         G = nx.DiGraph()
         edge_labels = {}
         for edge in zip(self.triu_x, self.triu_y):
@@ -492,7 +519,7 @@ class NasBench201Clusters(gym.Env):
             ax.margins(0.20)
             plt.axis("off")
             plt.show()
-
+            return True
             # assert self.window is not None
             # The following line copies our drawings from `canvas` to the visible window
             # self.window.blit(canvas, canvas.get_rect())
@@ -510,4 +537,55 @@ class NasBench201Clusters(gym.Env):
             plt.axis("off")
 
             canvas.draw()  # draw the canvas, cache the renderer
-            return np.frombuffer(canvas.tostring_rgb(), dtype='uint8')
+            return np.frombuffer(canvas.tostring_rgb(), dtype='uint8').reshape(
+                fig.canvas.get_width_height()[::-1] + (3,))
+
+
+class ActionMaskEnv(NasBench201Clusters):
+    """An environment that publishes an action-mask each step."""
+
+    def __init__(self, config):
+        super().__init__(config)
+        self._skip_env_checking = True
+        # Masking only works for Discrete actions.
+        assert isinstance(self.action_space, Discrete)
+        # Add action_mask to observations.
+        self.observation_space = Dict(
+            {
+                "action_mask": Box(0.0, 1.0, shape=(self.action_space.n,)),
+                "observations": self.observation_space,
+            }
+        )
+        self.valid_actions = None
+
+    def reset(self):
+        obs = super().reset()
+        obs = {"observations": obs}
+        self._fix_action_mask(obs)
+        return obs
+
+    def step(self, action):
+        # Check whether action is valid.
+        if not self.valid_actions[action]:
+            raise ValueError(
+                f"Invalid action sent to env! " f"valid_actions={self.valid_actions}"
+            )
+        obs, rew, done, info = super().step(action)
+        obs = {"observations": obs}
+        self._fix_action_mask(obs)
+        return obs, rew, done, info
+
+    def _fix_action_mask(self, obs):
+        # Check all actions to see which ones lead into the cluster of choice.
+        self.valid_actions = np.zeros(self.action_space.n)
+        for action in range(self.action_space.n):
+            new_adjacency_tensor = self._action2tensor(action)
+            _, cluster = self._get_reward(new_adjacency_tensor)
+            action_valid = cluster == self.cluster
+            self.valid_actions[action] = action_valid
+
+        if np.all(np.logical_not(self.valid_actions)):
+            # If non of the actions lead to the cluster, make all actions possible
+            self.valid_actions = np.logical_not(self.valid_actions)
+
+        obs["action_mask"] = self.valid_actions

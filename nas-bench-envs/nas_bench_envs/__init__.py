@@ -10,3 +10,8 @@ register(
     entry_point='nas_bench_envs.envs:NasBench201Clusters',
     max_episode_steps=1000,
 )
+register(
+    id='ActionMaskEnv-v0',
+    entry_point='nas_bench_envs.envs:ActionMaskEnv',
+    max_episode_steps=1000,
+)

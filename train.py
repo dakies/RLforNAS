@@ -17,9 +17,12 @@ module_path = os.path.abspath(os.path.join('nas-bench-envs'))
 if module_path not in sys.path:
     sys.path.append(module_path)
     os.environ['PYTHONPATH'] = module_path
-from nas_bench_envs.envs.nas_bench_201_envs import NasBench201Clusters
+from nas_bench_envs.envs.nas_bench_201_envs import NasBench201Clusters, ActionMaskEnv
 from nas_bench_envs.callbacks import MetricsCallbacks
-
+from ray.rllib.examples.models.action_mask_model import (
+    ActionMaskModel,
+    TorchActionMaskModel,
+)
 import ray
 from ray import tune
 from ray.rllib.utils.framework import try_import_torch
@@ -31,12 +34,12 @@ parser = argparse.ArgumentParser()
 # parser.add_argument(
 #     "--run", type=str, default="PPO", help="The RLlib-registered algorithm to use."
 # )
-# parser.add_argument(
-#     "--framework",
-#     choices=["tf", "tf2", "tfe", "torch"],
-#     default="torch",
-#     help="The DL framework specifier.",
-# )
+parser.add_argument(
+    "--framework",
+    choices=["tf", "tf2", "tfe", "torch"],
+    default="torch",
+    help="The DL framework specifier.",
+)
 parser.add_argument(
     "--network_init",
     choices=["random", "fixed", "cluster"],
@@ -52,6 +55,12 @@ parser.add_argument(
 parser.add_argument(
     "--cluster", type=int, default=11, help="Which C-BRED cluster index to aim for."
 )
+parser.add_argument(
+    "--action_masking",
+    action="store_true",
+    help="Use action masking to mask invalid actions.",
+)
+
 # parser.add_argument(
 #     "--as-test",
 #     action="store_true",
@@ -75,7 +84,7 @@ parser.add_argument(
 # )
 parser.add_argument(
     "--local-mode",
-    action="store_false",
+    action="store_true",
     help="Init Ray in local mode for easier debugging.",
 )
 
@@ -113,19 +122,66 @@ if __name__ == "__main__":
     env_config = {"cluster": args.cluster, "network_init": args.network_init, "dataset": args.dataset}
     config = (
         PPOConfig()
-        .framework("torch")
+        .framework(args.framework)
         .resources(num_gpus=1, num_cpus_per_worker=1)
         .environment(env=NasBench201Clusters, render_env=False, env_config=env_config)
         .rollouts(horizon=1000, num_rollout_workers=8)
         .reporting()  # keep_per_episode_custom_metrics= True
         .callbacks(MetricsCallbacks)
+        # .evaluation(evaluation_interval=10, evaluation_duration=1, evaluation_duration_unit="episodes",
+        #             evaluation_num_workers=1,
+        #             evaluation_parallel_to_training=True,
+        #             evaluation_config={"explore": False, "render_env": False}, )
     )
+    if args.action_masking:
+        model = {
+            "custom_model": ActionMaskModel
+            if args.framework != "torch"
+            else TorchActionMaskModel,
+            # disable action masking according to CLI
+            "custom_model_config": {"no_masking": not args.action_masking},
+        }
+        config.training(model=model)
+        config.environment(env=ActionMaskEnv)
     ray.init(local_mode=args.local_mode)
-    tune.run(
+    results = tune.run(
         PPO,
         config=config.to_dict(),
         stop={"training_iteration": 100},
         callbacks=[
             WandbLoggerCallback(api_key="c36c598399c6c7f2f0b446aac164da6c7956a263", project="RayNasBenchClustersV0")]
     )
+
+    # print("Training completed. Restoring new Trainer for action inference.")
+    # from ray.rllib.algorithms.registry import get_algorithm_class
+    # # Get the last checkpoint from the above training run.
+    # checkpoint = results.get_best_result().checkpoint
+    # # Create new Trainer and restore its state from the last checkpoint.
+    # algo = get_algorithm_class(args.run)(config=config)
+    # algo.restore(checkpoint)
+    #
+    # # Create the env to do inference in.
+    # env = gym.make("FrozenLake-v1")
+    # obs = env.reset()
+    #
+    # num_episodes = 0
+    # episode_reward = 0.0
+    #
+    # while num_episodes < args.num_episodes_during_inference:
+    #     # Compute an action (`a`).
+    #     a = algo.compute_single_action(
+    #         observation=obs,
+    #         explore=args.explore_during_inference,
+    #         policy_id="default_policy",  # <- default value
+    #     )
+    #     # Send the computed action `a` to the env.
+    #     obs, reward, done, _ = env.step(a)
+    #     episode_reward += reward
+    #     # Is the episode `done`? -> Reset.
+    #     if done:
+    #         print(f"Episode done: Total reward = {episode_reward}")
+    #         obs = env.reset()
+    #         num_episodes += 1
+    #         episode_reward = 0.0
+    
     ray.shutdown()
