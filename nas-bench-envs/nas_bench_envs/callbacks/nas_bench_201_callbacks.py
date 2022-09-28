@@ -1,10 +1,9 @@
-from typing import Dict
-
 import numpy as np
 from ray.rllib.algorithms.callbacks import DefaultCallbacks
 from ray.rllib.env import BaseEnv
 from ray.rllib.evaluation import Episode, RolloutWorker
 from ray.rllib.policy import Policy
+from typing import Dict
 
 
 class MetricsCallbacks(DefaultCallbacks):
@@ -74,8 +73,9 @@ class MetricsCallbacks(DefaultCallbacks):
         episode.custom_metrics["step_reward_max"] = float(np.max(episode.user_data["step_reward"]))
         episode.custom_metrics["step_reward_mean"] = float(np.mean(episode.user_data["step_reward"]))
         episode.custom_metrics["step_reward_min"] = float(np.min(episode.user_data["step_reward"]))
-        episode.custom_metrics["ratio_in_cluster"] = float(
-            episode.user_data["in_cluster"].count(1) / len(episode.user_data["in_cluster"]))
+        episode.custom_metrics["ratio_in_cluster"] = float(episode.user_data["in_cluster"].count(1) / episode.length)
+        episode.custom_metrics["out_cluster_episode"] = np.all(
+            np.logical_not(episode.custom_metrics["ratio_in_cluster"]))
         shift_right = np.pad(episode.user_data["in_cluster"], (1, 0), 'edge')
         step_out_cluster = np.logical_and(np.logical_not(episode.user_data["in_cluster"]), shift_right[:-1])
         episode.custom_metrics["no_step_out_cluster"] = int(np.count_nonzero(step_out_cluster == 1))

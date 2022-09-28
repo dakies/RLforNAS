@@ -4,7 +4,6 @@ import networkx as nx
 import numpy as np
 from gym import spaces
 from gym.spaces import Box, Dict, Discrete
-from gym.utils.renderer import Renderer
 from matplotlib.backends.backend_agg import FigureCanvasAgg as FigureCanvas
 from matplotlib.figure import Figure
 from nats_bench import create
@@ -58,7 +57,7 @@ class NasBench201(gym.Env):
         self.datatable = np.load('/home/sem22h2/Documents/ExploringRL/rl_dat.npy')
 
         # Rendering
-        self.renderer = Renderer(self.render_mode, self._render_frame)
+
         return
 
     def _get_obs(self):
@@ -199,8 +198,7 @@ class NasBench201(gym.Env):
         return observation
 
     def render(self, mode="human"):
-        # Just return the list of render frames collected by the Renderer.
-        return self.renderer.get_renders()
+        return
 
     def _render_frame(self, mode: str):
         G = nx.DiGraph()
@@ -272,7 +270,8 @@ class NasBench201Clusters(gym.Env):
         self.render_mode = config.get("render_mode", "rgb")
         self.dataset = config.get("dataset", "cifar10")
         self.cluster = config.get("cluster", 11)
-
+        if config.get("seed") is not None:
+            np.random.seed(config.get("seed"))
         # Environment definition
         self.vertices = 4
         self.ops = ['nor_conv_1x1', 'nor_conv_3x3', 'avg_pool_3x3', 'skip_connect']
@@ -306,11 +305,15 @@ class NasBench201Clusters(gym.Env):
         self.datatable = np.load('/home/sem22h2/Documents/ExploringRL/rl_dat.npy')
 
         # Rendering
-        self.renderer = Renderer(self.render_mode, self._render_frame)
+        if self.render_mode is not None:
+            self.G = nx.DiGraph()
+            plt.axis("off")
+            if self.render_mode == "rgb_array":
+                self.fig = Figure()
+                self.canvas = FigureCanvas(self.fig)
+
         # For logging
         self.in_cluster = 0
-        self.in_cluster_prev = 0
-        self.current_cluster = 0
 
         return
 
@@ -387,23 +390,19 @@ class NasBench201Clusters(gym.Env):
             reward = float(acc_imagenet_16) / 100
         elif self.dataset == 'cifar10':
             reward = float(acc_cifar10) / 100
-        self.current_cluster = cluster
-        self.in_cluster_prev = self.in_cluster
-        if cluster != self.cluster:
-            self.in_cluster = 0
-            # reward = -1
-        else:
-            self.in_cluster = 1
         return reward, cluster
 
     def step(self, action):
+        if 11 != self.cluster:
+            raise Exception("Reseted outside target cluster. Current cluster: {}".format(cluster))
         # For logging interconnectivity check where all actions lead
         # action_to_cluster_counter = 0
-        # for a in range(self.no_actions):
+        # for a in range(self.action_space.n):
         #     adjacency_tensor = self._action2tensor(a)
         #     reward, cluster = self._get_reward(adjacency_tensor)
         #     if cluster == self.cluster:
         #         action_to_cluster_counter += 1
+        # self.action2cluster = action_to_cluster_counter
 
         # Determine new adjacency matrix and observation space
         new_adjacency_tensor = self._action2tensor(action)
@@ -419,13 +418,21 @@ class NasBench201Clusters(gym.Env):
 
         # Only take step if it leads to a valid cluster. Disadvantage: Agent needs to learn that there are steps it
         # cannot take
-        if cluster == self.cluster:
-            self.adjacency_tensor = new_adjacency_tensor
-
+        # if cluster == self.cluster:
+        if cluster != self.cluster:
+            self.in_cluster = 0
+            # reward = -1
+        else:
+            self.in_cluster = 1
+        self.adjacency_tensor = new_adjacency_tensor
         observation = self._get_obs()
         info = self._get_info()
         # info["action_to_cluster_counter"] = action_to_cluster_counter
         done = False
+
+        if self.render_mode == "human":
+            self._render_frame()
+
         return observation, reward, done, info
 
     def set_rand_tensor(self):
@@ -455,7 +462,10 @@ class NasBench201Clusters(gym.Env):
                     adjacency_tensor[idx, source, i + 1] = 1
         return adjacency_tensor
 
-    def reset(self, **kwargs):
+    def reset(self, seed=None, options=None, **kwargs):
+        # We need the following line to seed self.np_random
+        super().reset(seed=seed)
+
         v = self.vertices
         no_ops = len(self.ops)
         self.adjacency_tensor = np.zeros([no_ops, v, v])
@@ -466,8 +476,7 @@ class NasBench201Clusters(gym.Env):
             self.adjacency_tensor[0, 0, 3] = 1
         elif self.network_init == "cluster":
             datatable = self.datatable
-            cluster = self.cluster
-            cluster_idx = np.where(datatable[:, 1] == str(cluster))[0]
+            cluster_idx = np.where(datatable[:, 1] == str(self.cluster))[0]
             arch_string = np.random.choice(datatable[cluster_idx, 0])
             genotype = arch_string
             genotype_list = CellStructure.str2fullstructure(genotype).tolist()[0]
@@ -478,15 +487,18 @@ class NasBench201Clusters(gym.Env):
         observation = self._get_obs()
         if self.render_mode == "human":
             self._render_frame()
+        reward, cluster = self._get_reward(self.adjacency_tensor)
+        if 11 != self.cluster:
+            raise Exception("Reseted outside target cluster. Current cluster: {}".format(cluster))
         return observation
 
-    def render(self, mode="rgb_array"):
-        # Just return the list of render frames collected by the Renderer.
+    def render(self):
         if self.render_mode == "rgb_array":
             return self._render_frame()
 
     def _render_frame(self):
-        G = nx.DiGraph()
+        G = self.G
+        G.clear()
         edge_labels = {}
         for edge in zip(self.triu_x, self.triu_y):
             if self.adjacency_tensor[edge, :].any():
@@ -529,16 +541,16 @@ class NasBench201Clusters(gym.Env):
             # We need to ensure that human-rendering occurs at the predefined framerate.
             # The following line will automatically add a delay to keep the framerate stable.
         else:  # rgb_array or single_rgb_array
-            fig = Figure()
-            canvas = FigureCanvas(fig)
+            fig = self.fig
+            canvas = self.canvas
             ax = fig.gca()
-
             ax.margins(0.20)
             plt.axis("off")
-
             canvas.draw()  # draw the canvas, cache the renderer
-            return np.frombuffer(canvas.tostring_rgb(), dtype='uint8').reshape(
+            rgb_array = np.frombuffer(canvas.tostring_rgb(), dtype='uint8').reshape(
                 fig.canvas.get_width_height()[::-1] + (3,))
+            plt.clf()
+            return rgb_array
 
 
 class ActionMaskEnv(NasBench201Clusters):
@@ -556,9 +568,10 @@ class ActionMaskEnv(NasBench201Clusters):
                 "observations": self.observation_space,
             }
         )
+        self.stuck = False
         self.valid_actions = None
 
-    def reset(self):
+    def reset(self, **kwargs):
         obs = super().reset()
         obs = {"observations": obs}
         self._fix_action_mask(obs)
@@ -573,6 +586,9 @@ class ActionMaskEnv(NasBench201Clusters):
         obs, rew, done, info = super().step(action)
         obs = {"observations": obs}
         self._fix_action_mask(obs)
+        if self.stuck:
+            done = 1
+            self.stuck = False
         return obs, rew, done, info
 
     def _fix_action_mask(self, obs):
@@ -584,8 +600,11 @@ class ActionMaskEnv(NasBench201Clusters):
             action_valid = cluster == self.cluster
             self.valid_actions[action] = action_valid
 
-        if np.all(np.logical_not(self.valid_actions)):
-            # If non of the actions lead to the cluster, make all actions possible
+        if np.all(np.logical_not(self.valid_actions)):  # If non of the actions lead to the cluster
+            # make all actions possible
             self.valid_actions = np.logical_not(self.valid_actions)
 
+            # raise Exception(
+            # "No possible action that leads into cluster from state{}".format(self._ten2str(self.adjacency_tensor)))
+            self.stuck = True
         obs["action_mask"] = self.valid_actions

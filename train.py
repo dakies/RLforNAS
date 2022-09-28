@@ -118,10 +118,11 @@ if __name__ == "__main__":
     #     "timesteps_total": args.stop_timesteps,
     #     "episode_reward_mean": args.stop_reward,
     # }
-
-    env_config = {"cluster": args.cluster, "network_init": args.network_init, "dataset": args.dataset}
+    seed = 1234
+    env_config = {"cluster": args.cluster, "network_init": args.network_init, "dataset": args.dataset, "seed": seed}
     config = (
         PPOConfig()
+        .debugging(seed=seed, log_level="WARN")
         .framework(args.framework)
         .resources(num_gpus=1, num_cpus_per_worker=1)
         .environment(env=NasBench201Clusters, render_env=False, env_config=env_config)
@@ -148,12 +149,16 @@ if __name__ == "__main__":
         PPO,
         config=config.to_dict(),
         stop={"training_iteration": 100},
+        checkpoint_freq=5,
+        checkpoint_at_end=True,
         callbacks=[
             WandbLoggerCallback(api_key="c36c598399c6c7f2f0b446aac164da6c7956a263", project="RayNasBenchClustersV0")]
     )
 
     # print("Training completed. Restoring new Trainer for action inference.")
     # from ray.rllib.algorithms.registry import get_algorithm_class
+    # import gym
+    #
     # # Get the last checkpoint from the above training run.
     # checkpoint = results.get_best_result().checkpoint
     # # Create new Trainer and restore its state from the last checkpoint.
@@ -161,13 +166,15 @@ if __name__ == "__main__":
     # algo.restore(checkpoint)
     #
     # # Create the env to do inference in.
-    # env = gym.make("FrozenLake-v1")
+    # env = gym.make(ActionMaskEnv(env_config))
     # obs = env.reset()
     #
+    # iterations = 1000
     # num_episodes = 0
-    # episode_reward = 0.0
+    # episode_rewards = np.NaN(iterations)
+    # best_reward = np.NaN(iterations)
     #
-    # while num_episodes < args.num_episodes_during_inference:
+    # for i in range(iterations):
     #     # Compute an action (`a`).
     #     a = algo.compute_single_action(
     #         observation=obs,
@@ -176,12 +183,11 @@ if __name__ == "__main__":
     #     )
     #     # Send the computed action `a` to the env.
     #     obs, reward, done, _ = env.step(a)
-    #     episode_reward += reward
-    #     # Is the episode `done`? -> Reset.
-    #     if done:
-    #         print(f"Episode done: Total reward = {episode_reward}")
-    #         obs = env.reset()
-    #         num_episodes += 1
-    #         episode_reward = 0.0
-    
-    ray.shutdown()
+    #     episode_rewards[i] = reward
+    #     best_reward[i] = np.max(best_reward)
+    #
+    # with open('inference.npy', 'wb') as f:
+    #     np.save(f, episode_rewards)
+    #     np.save(f, best_reward)
+    #
+    # ray.shutdown()
