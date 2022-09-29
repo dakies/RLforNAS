@@ -190,4 +190,5 @@ if __name__ == "__main__":
     #     np.save(f, episode_rewards)
     #     np.save(f, best_reward)
     #
-    # ray.shutdown()
+
+ray.shutdown()

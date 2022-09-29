@@ -270,8 +270,8 @@ class NasBench201Clusters(gym.Env):
         self.render_mode = config.get("render_mode", "rgb")
         self.dataset = config.get("dataset", "cifar10")
         self.cluster = config.get("cluster", 11)
-        if config.get("seed") is not None:
-            np.random.seed(config.get("seed"))
+        np.random.seed(config.get("seed", None))
+
         # Environment definition
         self.vertices = 4
         self.ops = ['nor_conv_1x1', 'nor_conv_3x3', 'avg_pool_3x3', 'skip_connect']
@@ -290,11 +290,10 @@ class NasBench201Clusters(gym.Env):
         # Helper
         self.triu_y, self.triu_x = np.triu_indices(v, 1)  # Indices of upper triangular matrix
         self.num_triu = len(self.triu_y)  # Number of upper triangular elements in matrix
-        num_triu = self.num_triu
 
         # Environment
-        self.observation_space = spaces.MultiBinary(no_ops * num_triu)
-        self.action_space = spaces.Discrete(no_ops * num_triu)
+        self.observation_space = spaces.MultiBinary(no_ops * self.num_triu)
+        self.action_space = spaces.Discrete(no_ops * self.num_triu)
         self.reward = np.nan
 
         # Len intervals
@@ -392,49 +391,6 @@ class NasBench201Clusters(gym.Env):
             reward = float(acc_cifar10) / 100
         return reward, cluster
 
-    def step(self, action):
-        if 11 != self.cluster:
-            raise Exception("Reseted outside target cluster. Current cluster: {}".format(cluster))
-        # For logging interconnectivity check where all actions lead
-        # action_to_cluster_counter = 0
-        # for a in range(self.action_space.n):
-        #     adjacency_tensor = self._action2tensor(a)
-        #     reward, cluster = self._get_reward(adjacency_tensor)
-        #     if cluster == self.cluster:
-        #         action_to_cluster_counter += 1
-        # self.action2cluster = action_to_cluster_counter
-
-        # Determine new adjacency matrix and observation space
-        new_adjacency_tensor = self._action2tensor(action)
-        # Check matrix is upper diagonal
-        # for i in range(self.adjacency_tensor.shape[0]):
-        #     matrix = self.adjacency_tensor[i, :, :]
-        #     # breakpoint()
-        #     assert (np.allclose(matrix, np.triu(matrix)))
-
-        # Calculate reward
-        reward, cluster = self._get_reward(new_adjacency_tensor)
-        self.reward = reward
-
-        # Only take step if it leads to a valid cluster. Disadvantage: Agent needs to learn that there are steps it
-        # cannot take
-        # if cluster == self.cluster:
-        if cluster != self.cluster:
-            self.in_cluster = 0
-            # reward = -1
-        else:
-            self.in_cluster = 1
-        self.adjacency_tensor = new_adjacency_tensor
-        observation = self._get_obs()
-        info = self._get_info()
-        # info["action_to_cluster_counter"] = action_to_cluster_counter
-        done = False
-
-        if self.render_mode == "human":
-            self._render_frame()
-
-        return observation, reward, done, info
-
     def set_rand_tensor(self):
         """
         Initialize a random upper diagonal hot-one tensor.
@@ -487,10 +443,55 @@ class NasBench201Clusters(gym.Env):
         observation = self._get_obs()
         if self.render_mode == "human":
             self._render_frame()
-        reward, cluster = self._get_reward(self.adjacency_tensor)
-        if 11 != self.cluster:
-            raise Exception("Reseted outside target cluster. Current cluster: {}".format(cluster))
+        _, cluster = self._get_reward(self.adjacency_tensor)
+        if self.cluster != cluster:
+            raise ValueError("Reseted outside target cluster. Current cluster: {}".format(cluster))
         return observation
+
+    def step(self, action):
+        # For logging interconnectivity check where all actions lead
+        # action_to_cluster_counter = 0
+        # for a in range(self.action_space.n):
+        #     adjacency_tensor = self._action2tensor(a)
+        #     reward, cluster = self._get_reward(adjacency_tensor)
+        #     if cluster == self.cluster:
+        #         action_to_cluster_counter += 1
+        # self.action2cluster = action_to_cluster_counter
+
+        # Determine new adjacency matrix and observation space
+        new_adjacency_tensor = self._action2tensor(action)
+        # Check matrix is upper diagonal
+        # for i in range(self.adjacency_tensor.shape[0]):
+        #     matrix = self.adjacency_tensor[i, :, :]
+        #     # breakpoint()
+        #     assert (np.allclose(matrix, np.triu(matrix)))
+
+        # Calculate reward
+        reward, cluster = self._get_reward(new_adjacency_tensor)
+        self.reward = reward
+
+        # Only take step if it leads to a valid cluster. Disadvantage: Agent needs to learn that there are steps it
+        # cannot take
+        # if cluster == self.cluster:
+        if cluster != self.cluster:
+            # raise Exception("Stepped outside target cluster. Current cluster: {} "
+            #                 "Allowed actions: {} Stuck:{} Stepped outside target cluster"
+            #                 "Prev. state: {} Current state: {}"
+            #                 "".format(cluster, self.valid_actions, bool(self.stuck),
+            #                           self._ten2str(self.adjacency_tensor),
+            #                           self._ten2str(new_adjacency_tensor)))
+            self.in_cluster = 0
+            # reward = -1
+        else:
+            self.in_cluster = 1
+        self.adjacency_tensor = new_adjacency_tensor
+        observation = self._get_obs()
+        info = self._get_info()
+        # info["action_to_cluster_counter"] = action_to_cluster_counter
+        done = False
+        if self.render_mode == "human":
+            self._render_frame()
+        return observation, reward, done, info
 
     def render(self):
         if self.render_mode == "rgb_array":
@@ -575,6 +576,11 @@ class ActionMaskEnv(NasBench201Clusters):
         obs = super().reset()
         obs = {"observations": obs}
         self._fix_action_mask(obs)
+
+        while self.stuck:  # Reset till we reach a state we can move away from
+            obs = super().reset()
+            obs = {"observations": obs}
+            self._fix_action_mask(obs)
         return obs
 
     def step(self, action):
@@ -583,12 +589,14 @@ class ActionMaskEnv(NasBench201Clusters):
             raise ValueError(
                 f"Invalid action sent to env! " f"valid_actions={self.valid_actions}"
             )
-        obs, rew, done, info = super().step(action)
+        obs, rew, _, info = super().step(action)
         obs = {"observations": obs}
         self._fix_action_mask(obs)
         if self.stuck:
             done = 1
             self.stuck = False
+        else:
+            done = 0
         return obs, rew, done, info
 
     def _fix_action_mask(self, obs):
@@ -602,9 +610,11 @@ class ActionMaskEnv(NasBench201Clusters):
 
         if np.all(np.logical_not(self.valid_actions)):  # If non of the actions lead to the cluster
             # make all actions possible
-            self.valid_actions = np.logical_not(self.valid_actions)
+            # self.valid_actions = np.logical_not(self.valid_actions)
 
             # raise Exception(
             # "No possible action that leads into cluster from state{}".format(self._ten2str(self.adjacency_tensor)))
             self.stuck = True
+        else:
+            self.stuck = False
         obs["action_mask"] = self.valid_actions
