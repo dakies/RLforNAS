@@ -8,7 +8,6 @@ $ python custom_env.py --help
 import argparse
 import os
 import sys
-
 from ray.air.callbacks.wandb import WandbLoggerCallback
 # from ray.rllib.agents.ppo import ppo
 from ray.rllib.algorithms.ppo import PPO, PPOConfig
@@ -68,7 +67,7 @@ parser.add_argument(
 #     "be achieved within --stop-timesteps AND --stop-iters.",
 # )
 # parser.add_argument(
-#     "--stop-iters", type=int, default=50, help="Number of iterations to train."
+#     "--stop-iters", type=int, default=50, help="Number of steps to train."
 # )
 # parser.add_argument(
 #     "--stop-timesteps", type=int, default=100000, help="Number of timesteps to train."
@@ -76,12 +75,12 @@ parser.add_argument(
 # parser.add_argument(
 #     "--stop-reward", type=float, default=0.1, help="Reward at which we stop training."
 # )
-# parser.add_argument(
-#     "--no-tune",
-#     action="store_true",
-#     help="Run without Tune using a manual train loop instead. In this case,"
-#     "use PPO without grid search and no TensorBoard.",
-# )
+parser.add_argument(
+    "--no-tune",
+    action="store_true",
+    help="Run without Tune using a manual train loop instead. In this case,"
+         "use PPO without grid search and no TensorBoard.",
+)
 parser.add_argument(
     "--local-mode",
     action="store_true",
@@ -126,9 +125,11 @@ if __name__ == "__main__":
         .framework(args.framework)
         .resources(num_gpus=1, num_cpus_per_worker=1)
         .environment(env=NasBench201Clusters, render_env=False, env_config=env_config)
-        .rollouts(horizon=1000, num_rollout_workers=8)
+        .rollouts(horizon=100, num_rollout_workers=1)
         .reporting()  # keep_per_episode_custom_metrics= True
         .callbacks(MetricsCallbacks)
+        .training(train_batch_size=500)
+        # .offline_data(output="logdir")
         # .evaluation(evaluation_interval=10, evaluation_duration=1, evaluation_duration_unit="episodes",
         #             evaluation_num_workers=1,
         #             evaluation_parallel_to_training=True,
@@ -148,9 +149,10 @@ if __name__ == "__main__":
     results = tune.run(
         PPO,
         config=config.to_dict(),
-        stop={"training_iteration": 100},
-        checkpoint_freq=5,
+        stop={"training_iteration": 10},  # {"timesteps_total": 1000},
+        checkpoint_freq=1,
         checkpoint_at_end=True,
+        local_dir="./results",
         callbacks=[
             WandbLoggerCallback(api_key="c36c598399c6c7f2f0b446aac164da6c7956a263", project="RayNasBenchClustersV0")]
     )
@@ -169,12 +171,12 @@ if __name__ == "__main__":
     # env = gym.make(ActionMaskEnv(env_config))
     # obs = env.reset()
     #
-    # iterations = 1000
+    # steps = 1000
     # num_episodes = 0
-    # episode_rewards = np.NaN(iterations)
-    # best_reward = np.NaN(iterations)
+    # episode_rewards = np.NaN(steps)
+    # best_reward = np.NaN(steps)
     #
-    # for i in range(iterations):
+    # for i in range(steps):
     #     # Compute an action (`a`).
     #     a = algo.compute_single_action(
     #         observation=obs,
@@ -190,5 +192,4 @@ if __name__ == "__main__":
     #     np.save(f, episode_rewards)
     #     np.save(f, best_reward)
     #
-
-ray.shutdown()
+    ray.shutdown()

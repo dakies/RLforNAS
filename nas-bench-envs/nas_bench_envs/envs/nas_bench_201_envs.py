@@ -70,7 +70,7 @@ class NasBench201(gym.Env):
     def _get_info(self):
         return {"adjacency_tensor": self.adjacency_tensor,
                 "step_reward": self.reward,
-                "train_time": int(self._nb201_lookup()['train-all-time']),
+                # "train_time": int(self._nb201_lookup()['train-all-time']),
                 # "NATS_info": self._nb201_lookup(),
                 # "cost_info": api.get_cost_info(self._ten2str(), self.dataset),
                 }
@@ -326,7 +326,7 @@ class NasBench201Clusters(gym.Env):
     def _get_info(self):
         return {"adjacency_tensor": self.adjacency_tensor,
                 "step_reward": self.reward,
-                "train_time": int(self._nb201_lookup()['train-all-time']),
+                # "train_time": int(self._nb201_lookup()['train-all-time']),
                 "in_cluster": bool(self.in_cluster),
                 # "NATS_info": self._nb201_lookup(),
                 # "cost_info": api.get_cost_info(self._ten2str(), self.dataset),
@@ -444,8 +444,8 @@ class NasBench201Clusters(gym.Env):
         if self.render_mode == "human":
             self._render_frame()
         _, cluster = self._get_reward(self.adjacency_tensor)
-        if self.cluster != cluster:
-            raise ValueError("Reseted outside target cluster. Current cluster: {}".format(cluster))
+        # if self.cluster != cluster:
+        #     raise ValueError("Reseted outside target cluster. Current cluster: {}".format(cluster))
         return observation
 
     def step(self, action):
@@ -558,6 +558,8 @@ class ActionMaskEnv(NasBench201Clusters):
     """An environment that publishes an action-mask each step."""
 
     def __init__(self, config):
+        if config is None:
+            config = {}
         super().__init__(config)
         self._skip_env_checking = True
         # Masking only works for Discrete actions.
